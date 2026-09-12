@@ -1,0 +1,30 @@
+[project]
+name = "pa-core"
+version = "0.1.0"
+requires-python = ">=3.14"
+dependencies = [
+    "pydantic>=2.13",
+    "pydantic-settings>=2.15",
+    "structlog>=26.1",
+    "typer>=0.27",
+    # ONE http stack for the whole repo. `anthropic` 1.x is built on httpx2, and the
+    # `ollama` python package is built on httpx -- installing both would put two
+    # near-identical HTTP stacks in one venv, so we hand-roll Ollama on httpx2.
+    "httpx2>=2.12",
+    "keyring>=25.7",
+    "google-api-python-client>=2.200",
+    "google-auth-oauthlib>=1.4",
+]
+
+[project.optional-dependencies]
+# Heavy/optional backends stay out of the default venv so the 6am import stays fast.
+vectors = ["sqlite-vec>=0.1.9"]                     # project 6 only
+web = ["trafilatura>=2.2", "ddgs>=9.16"]            # deferred past project 1
+anthropic = ["anthropic>=1.5"]                      # optional paid upgrade
+
+[project.scripts]
+pa-core-admin = "pa_core.cli:app"
+
+[build-system]
+requires = ["uv_build>=0.11,<0.13"]
+build-backend = "uv_build"

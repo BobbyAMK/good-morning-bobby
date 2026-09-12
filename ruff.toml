@@ -1,0 +1,22 @@
+target-version = "py314"
+line-length = 100
+
+[lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "RUF", "ASYNC", "DTZ"]
+ignore = [
+  "E501",    # line length is handled by the formatter
+  "SIM108",  # ternaries are not always clearer
+  "B008",    # typer.Option() in a default IS the typer idiom
+  "RUF001",  # en dashes in time ranges (09:30–10:30) are a deliberate typographic choice
+  "SIM102",  # nested ifs are often clearer than a long `and`
+  "SIM103",  # an explicit if-chain documents each exclusion; a bare return does not
+  "UP047",   # PEP 695 type params in a 3-line retry helper buy nothing
+]
+
+[lint.per-file-ignores]
+# These bare excepts are deliberate: an alert path and a failure-recording path must
+# never raise, because both run while something has already gone wrong.
+"packages/core/src/pa_core/harness/*.py" = ["SIM105", "BLE001"]
+"packages/core/src/pa_core/secrets.py" = ["SIM105"]
+"tests/**" = ["B011", "E731"]
+

@@ -1,0 +1,28 @@
+[project]
+name = "pet-project"
+version = "0.0.0"
+# NOTE: a uv workspace takes the INTERSECTION of its members' requires-python,
+# so raising this on any one member raises it for the whole workspace.
+requires-python = ">=3.14"
+dependencies = []
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.16.7",
+    "pytest>=9.1",
+    "pytest-asyncio>=1.0",
+    "pre-commit>=4.0",
+]
+
+[tool.pytest.ini_options]
+# `live` tests hit real Ollama / Google / Telegram and are excluded by default,
+# so `uv run pytest` never needs network or a running Ollama.
+addopts = "-q -m 'not live'"
+markers = ["live: hits real Ollama/Google/Telegram; run manually"]
+testpaths = ["tests"]
