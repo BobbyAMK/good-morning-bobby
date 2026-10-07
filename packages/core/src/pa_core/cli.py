@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from pathlib import Path
-
 import typer
 
-app = typer.Typer(no_args_is_help=True, add_completion=False, help="pet-agents admin.")
+app = typer.Typer(
+    no_args_is_help=True,
+    add_completion=False,
+    help="Good Morning Bobby setup, health, and run history.",
+)
 
 
 def _cfg():
@@ -25,32 +27,46 @@ def _con():
     return con
 
 
-# ----------------------------------------------------------------- google setup
-@app.command("google-client")
-def google_client(
-    file: Path = typer.Option(..., "--file", help="Desktop OAuth client JSON"),
-) -> None:
-    """Store the downloaded OAuth client JSON in the Keychain (not on disk)."""
-    from .connectors.google_auth import store_client_config
-
-    store_client_config(file.read_text())
-    typer.echo("stored OAuth client config in Keychain. Next: pa-core-admin google-login")
-
-
-@app.command("google-login")
-def google_login(
-    p3: bool = typer.Option(
-        False, "--p3", help="Request gmail.modify (project 3) instead of readonly"
-    ),
-) -> None:
-    """Run the interactive consent flow once. Opens a browser."""
-    from .connectors.google_auth import SCOPES_P1, SCOPES_P3, get_credentials
-
-    creds = get_credentials(scopes=SCOPES_P3 if p3 else SCOPES_P1, interactive=True)
-    typer.echo(f"authorized. scopes: {sorted(creds.scopes or [])}")
-
-
 # ----------------------------------------------------------------- telegram setup
+TOKEN_RE = r"\d{6,12}:[A-Za-z0-9_-]{30,40}"
+
+
+@app.command("telegram-token")
+def telegram_token() -> None:
+    """Store the @BotFather token in the Keychain -- only after Telegram confirms it.
+
+    A bare `keyring set` accepts anything, and a wrong paste then surfaces much later as
+    a bot you "cannot find". Validate first, store second.
+    """
+    import getpass
+    import re
+
+    from . import secrets as sec
+    from .delivery.telegram import TelegramSink
+
+    token = getpass.getpass("Bot token from @BotFather (input hidden): ").strip()
+    if not re.fullmatch(TOKEN_RE, token):
+        typer.echo(
+            f"That is not a bot token (got {len(token)} chars). A token looks like "
+            "123456789:AAH... (~46 chars, one colon). In @BotFather send /mybots, pick "
+            "your bot, then 'API Token'. Nothing was stored.",
+            err=True,
+        )
+        raise typer.Exit(1)
+    try:
+        me = TelegramSink(token, "0").me()
+    except Exception as e:
+        typer.echo(f"Telegram rejected the token: {e}. Nothing was stored.", err=True)
+        raise typer.Exit(1) from e
+    username = me.get("username")
+    if not username:
+        typer.echo("Telegram did not confirm the token. Nothing was stored.", err=True)
+        raise typer.Exit(1)
+    sec.put("telegram_token", token)
+    typer.echo(f"stored token for @{username}")
+    typer.echo(f"Open https://t.me/{username} , press Start, then: just telegram-bind")
+
+
 @app.command("telegram-bind")
 def telegram_bind() -> None:
     """Read your chat id from a message you sent the bot, and PIN it to an allow-list.
@@ -64,6 +80,10 @@ def telegram_bind() -> None:
     token = sec.get("telegram_token")
     me = TelegramSink(token, "0").me()
     typer.echo(f"bot: @{me.get('username')}")
+    typer.echo(
+        "note: if pa-bot is running it consumes getUpdates first. Stop it while binding:\n"
+        "  launchctl bootout gui/$(id -u)/com.pa.bot   (then: just install-brief)"
+    )
     chat = discover_chat_id(token)
     if not chat:
         typer.echo("No messages found. Send your bot any message, then re-run.", err=True)
@@ -88,13 +108,13 @@ def telegram_test() -> None:
         "**Load:** 4h15m booked / 3 external (2 internal-only) - protect tonight.\n"
         "· Mai Tran <mai@client.com> asked twice & is blocked. Cost: $0.09.\n"
         "· see [the sheet](https://example.com/q4?a=1&b=2)\n"
-        "`messages.get(format='metadata')` — em dash, ellipsis…\n"
+        "`source.release(version='0.9.2')` - code, punctuation, ellipsis…\n"
         "---\n"
         "Every one of those chars would need escaping in MarkdownV2. In HTML mode: none.\n"
         + ("filler to force a second chunk. " * 180)
     )
     d = TelegramSink(sec.get("telegram_token"), chat).deliver(
-        title="pet-agents self-test", body_markdown=body, run_id="selftest"
+        title="Good Morning Bobby self-test", body_markdown=body, run_id="selftest"
     )
     typer.echo(f"ok={d.ok} id={d.external_id} err={d.error}")
     raise typer.Exit(0 if d.ok else 1)
@@ -112,15 +132,14 @@ def smoke_llm() -> None:
 
     class Out(BaseModel):
         model_config = {"extra": "forbid"}
-        bucket: str
-        why: str
+        keywords: list[str]
 
     cfg = _cfg()
     llm = build_llm(cfg, UsageLog(_con(), cfg.monthly_budget_usd))
     res = llm.complete(
-        task=Task.CLASSIFY,
-        system="Classify. JSON only. bucket is one of: needs_reply, ignore.",
-        user="From: mai@client.com\nSubject: still blocked on the Q4 sheet\nClassify.",
+        task=Task.EXTRACT,
+        system="Extract software search keywords. JSON only, with a keywords list.",
+        user="Find a Python HTTP client library.",
         agent="smoke",
         schema=Out,
         max_tokens=200,
@@ -173,8 +192,6 @@ def bench() -> None:
 def doctor() -> None:
     """Everything that silently breaks, checked in one place."""
     from . import secrets as sec
-    from .connectors.google_auth import SCOPES_P1, granted_scopes
-    from .connectors.google_auth import health as ghealth
     from .harness.alerting import preflight
     from .llm.ollama import OllamaBackend
     from .store.db import kv_get
@@ -184,7 +201,7 @@ def doctor() -> None:
 
     def line(ok: bool, label: str, detail: str = "") -> None:
         nonlocal bad
-        typer.echo(("  ok   " if ok else "  FAIL ") + label + (f" — {detail}" if detail else ""))
+        typer.echo(("  ok   " if ok else "  FAIL ") + label + (f" - {detail}" if detail else ""))
         if not ok:
             bad += 1
 
@@ -192,7 +209,6 @@ def doctor() -> None:
     line(True, "data_dir", str(cfg.data_dir))
     line(True, "timezone", cfg.tz)
     line(True, "num_ctx", str(cfg.num_ctx))
-    line(True, "allow_cloud", str(cfg.allow_cloud))
     line(True, "keychain backend", sec.backend_name())
 
     typer.echo("ollama")
@@ -203,23 +219,9 @@ def doctor() -> None:
 
     typer.echo("telegram")
     tok = sec.get_optional("telegram_token")
-    line(bool(tok), "token in Keychain", "" if tok else "keyring set pet-agents telegram_token")
+    line(bool(tok), "token in Keychain", "" if tok else "run: just telegram-token")
     chat = kv_get(con, "telegram:chat_id")
     line(bool(chat), "chat bound", chat or "run: pa-core-admin telegram-bind")
-
-    typer.echo("google")
-    got = granted_scopes()
-    if not got:
-        line(False, "credentials", "run: pa-core-admin google-login")
-    else:
-        ok, msg = ghealth()
-        line(ok, "live call", msg)
-        missing = set(SCOPES_P1) - got
-        line(
-            not missing,
-            "scopes",
-            f"missing {sorted(missing)}" if missing else "minimal set present",
-        )
 
     typer.echo("runs")
     for r in con.execute(
@@ -244,26 +246,6 @@ def watchdog() -> None:
     from .harness.run import run_watchdog
 
     raise typer.Exit(run_watchdog())
-
-
-@app.command("vip")
-def vip(
-    add_domain: list[str] = typer.Option([], "--domain", help="VIP domain (never auto-ignored)"),
-    add_addr: list[str] = typer.Option([], "--addr", help="VIP address"),
-    mute: list[str] = typer.Option([], "--mute", help="Domain to always ignore"),
-    show: bool = typer.Option(False, "--show"),
-) -> None:
-    """VIPs always reach the LLM -- they are never auto-ignored by any rule."""
-    from .store.db import kv_get, kv_put
-
-    con = _con()
-    for key, vals in (("vip:domains", add_domain), ("vip:addrs", add_addr), ("mute:domains", mute)):
-        if vals:
-            cur = [x for x in (kv_get(con, key) or "").split(",") if x]
-            kv_put(con, key, ",".join(sorted(set(cur) | {v.lower() for v in vals})))
-    if show or not (add_domain or add_addr or mute):
-        for key in ("vip:domains", "vip:addrs", "mute:domains"):
-            typer.echo(f"{key}: {kv_get(con, key) or '(none)'}")
 
 
 @app.command("runs")
