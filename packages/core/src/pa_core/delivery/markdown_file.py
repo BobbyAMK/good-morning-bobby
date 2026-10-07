@@ -10,6 +10,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
+from ..text import plain_dashes
 from .base import Delivered
 
 _SLUG = re.compile(r"[^a-z0-9]+")
@@ -39,7 +40,7 @@ class MarkdownFileSink:
                 f"run_id: {run_id}\n"
                 "---\n\n"
             )
-            path.write_text(front + body_markdown, encoding="utf-8")
+            path.write_text(plain_dashes(front + body_markdown), encoding="utf-8")
             return Delivered(self.name, str(path), True)
         except OSError as e:
             return Delivered(self.name, None, False, f"{type(e).__name__}: {e}")
