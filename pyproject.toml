@@ -1,5 +1,5 @@
 [project]
-name = "pet-project"
+name = "good-morning-bobby"
 version = "0.0.0"
 # NOTE: a uv workspace takes the INTERSECTION of its members' requires-python,
 # so raising this on any one member raises it for the whole workspace.
@@ -21,8 +21,8 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-# `live` tests hit real Ollama / Google / Telegram and are excluded by default,
+# `live` tests hit real Ollama / public sources / Telegram and are excluded by default,
 # so `uv run pytest` never needs network or a running Ollama.
 addopts = "-q -m 'not live'"
-markers = ["live: hits real Ollama/Google/Telegram; run manually"]
+markers = ["live: hits real Ollama/public sources/Telegram; run manually"]
 testpaths = ["tests"]
