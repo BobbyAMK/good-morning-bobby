@@ -26,20 +26,6 @@ class MigrationError(ConfigError):
     pass
 
 
-# --- credentials: recoverable only by an interactive human -------------------
-class GoogleAuthError(PaError):
-    pass
-
-
-class GoogleAuthMissing(GoogleAuthError):
-    pass
-
-
-class GoogleAuthExpired(GoogleAuthError):
-    """Refresh token rejected: revoked, password changed, 7-day Testing expiry,
-    6-month idle expiry, or pushed out by the 100-token-per-client-id cap."""
-
-
 # --- LLM -------------------------------------------------------------------
 class LLMError(PaError):
     pass
