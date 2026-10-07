@@ -1,10 +1,4 @@
-"""SQLite connections with the pragmas that matter.
-
-Two databases, not one and not ten:
-  platform.db -- small, precious, irreplaceable. Back it up.
-  brain.db    -- large, fully rebuildable from source files. Excluded from backups,
-                 so a re-embed or VACUUM never holds a write lock the 6am brief wants.
-"""
+"""SQLite storage for briefs, delivery receipts, saved notes, and run telemetry."""
 
 from __future__ import annotations
 
@@ -16,7 +10,7 @@ from pathlib import Path
 MIGRATIONS = Path(__file__).parent / "migrations"
 
 
-def connect(path: Path, *, vectors: bool = False, timeout: float = 10.0) -> sqlite3.Connection:
+def connect(path: Path, *, timeout: float = 10.0) -> sqlite3.Connection:
     path.parent.mkdir(parents=True, exist_ok=True)
     # isolation_level=None -> autocommit; we open transactions explicitly where we
     # want them, which keeps executescript()'s implicit COMMIT from surprising us.
@@ -26,12 +20,6 @@ def connect(path: Path, *, vectors: bool = False, timeout: float = 10.0) -> sqli
     con.execute("pragma synchronous = NORMAL")  # WAL makes this safe enough
     con.execute("pragma foreign_keys = ON")  # OFF by default in sqlite3 -- always set it
     con.execute("pragma busy_timeout = 10000")
-    if vectors:
-        import sqlite_vec
-
-        con.enable_load_extension(True)
-        sqlite_vec.load(con)
-        con.enable_load_extension(False)  # re-close the door
     return con
 
 
