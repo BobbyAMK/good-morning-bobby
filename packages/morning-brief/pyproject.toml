@@ -2,10 +2,14 @@
 name = "pa-morning-brief"
 version = "0.1.0"
 requires-python = ">=3.14"
-dependencies = ["pa-core"]
+dependencies = [
+    "feedparser>=6.0",
+    "pa-core",
+]
 
 [project.scripts]
 pa-morning-brief = "pa_morning_brief.cli:app"
+pa-bot = "pa_morning_brief.bot:main"
 
 [tool.uv.sources]
 pa-core = { workspace = true }
