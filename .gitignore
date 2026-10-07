@@ -8,9 +8,6 @@ data/
 *.db-wal
 *.db-shm
 
-# hand-written persona cards may contain private writing samples
-personas/*.local.md
-
 # python
 .venv/
 __pycache__/
