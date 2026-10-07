@@ -1,8 +1,6 @@
 """Ollama backend -- the DEFAULT, and on the zero-cost path the only one.
 
-Hand-rolled on httpx2 rather than using the `ollama` package: that package depends on
-`httpx` while `anthropic` 1.x depends on `httpx2`, and installing both would put two
-near-identical HTTP stacks in one venv. We need exactly two endpoints.
+Uses the same HTTP client as source fetching and Telegram delivery.
 
 NOTE: the `httpx2` distribution installs as the module `httpx2`, not `httpx`.
 """
@@ -10,7 +8,6 @@ NOTE: the `httpx2` distribution installs as the module `httpx2`, not `httpx`.
 from __future__ import annotations
 
 import time
-from collections.abc import Sequence
 
 import httpx2 as httpx
 from pydantic import BaseModel, ValidationError
@@ -107,17 +104,6 @@ class OllamaBackend:
             truncated=d.get("done_reason") == "length",
         )
 
-    # ---------------------------------------------------------------- embeddings
-    def embed(self, texts: Sequence[str], *, model: str) -> list[list[float]]:
-        if not texts:
-            return []
-        try:
-            r = self._c.post("/api/embed", json={"model": model, "input": list(texts)})
-            r.raise_for_status()
-        except httpx.HTTPError as e:
-            raise LLMUnavailable(f"ollama embed failed: {e}") from e
-        return r.json()["embeddings"]
-
     # ---------------------------------------------------------------- health
     def health(self) -> tuple[bool, str]:
         try:
@@ -136,8 +122,7 @@ class OllamaBackend:
     def bench(self, model: str, *, prompt_tokens: int = 2000, gen_tokens: int = 200) -> dict:
         """Measure real prefill and generation throughput on THIS machine.
 
-        Every latency figure in the plan is an estimate from memory-bandwidth class.
-        This replaces the estimate with a number.
+        Reports a local measurement rather than a hardware-based estimate.
         """
         filler = "the quick brown fox jumps over the lazy dog. " * ((prompt_tokens // 9) + 1)
         t0 = time.monotonic()
