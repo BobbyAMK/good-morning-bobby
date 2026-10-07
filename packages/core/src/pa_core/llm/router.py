@@ -1,22 +1,12 @@
-"""The LLM facade.
+"""Local inference routing, structured output validation, retries, and usage logging.
 
-THE design decision here: `sensitive: bool = True` is the DEFAULT. A call must
-explicitly opt out of privacy to be allowed off this machine. Mail, calendar, notes
-and finances therefore cannot leak by omission -- only by someone writing
-`sensitive=False`, which a lint test greps for.
-
-Why that matters concretely: Google's own Gemini API terms say free-tier content is
-used to "provide, improve, and develop Google products" and that "human reviewers may
-read, annotate, and process your API input and output". The paid tier does not. So a
-free cloud tier is attractive on price and disqualifying on privacy, and the type
-system should make the distinction impossible to forget.
+Sensitive inputs are restricted to local backends. The morning brief configures Ollama.
 """
 
 from __future__ import annotations
 
 import random
 import time
-from collections.abc import Sequence
 
 import structlog
 from pydantic import BaseModel
@@ -91,15 +81,9 @@ class LLM:
         schema: type[BaseModel] | None = None,
         max_tokens: int = 2048,
         temperature: float = 0.2,
-        persona: str | None = None,
         retries: int | None = None,
         timeout_s: float | None = None,
     ) -> LLMResult:
-        # The persona card is PREPENDED to system, never interpolated into user, so a
-        # cloud backend can put a cache breakpoint after a stable prefix by construction.
-        if persona:
-            system = f"{persona}\n\n{system}"
-
         tries = self._retries if retries is None else retries
         chain = self._chain(task, sensitive)
         last: Exception | None = None
@@ -118,7 +102,7 @@ class LLM:
                         max_tokens=max_tokens,
                         temperature=temperature,
                         schema=schema,
-                        cacheable_prefix=system if persona else None,
+                        cacheable_prefix=None,
                         timeout_s=timeout_s or self._timeout,
                     )
                 except (LLMUnavailable, LLMBadOutput) as e:
@@ -194,71 +178,6 @@ class LLM:
             error=f"{type(e).__name__}: {e}"[:500],
         )
 
-    # --------------------------------------------------------------- map-reduce
-    def map_reduce(
-        self,
-        *,
-        chunks: Sequence[str],
-        map_system: str,
-        map_user_tmpl: str,
-        reduce_system: str,
-        reduce_user_tmpl: str,
-        agent: str,
-        run_id: str | None = None,
-        sensitive: bool = True,
-        reduce_schema: type[BaseModel] | None = None,
-        map_task: Task = Task.SUMMARIZE,
-        reduce_task: Task = Task.SYNTHESIZE,
-        map_max_tokens: int = 512,
-        reduce_max_tokens: int = 2048,
-        persona: str | None = None,
-    ) -> tuple[LLMResult, list[str]]:
-        """MAP each chunk with the small model, then REDUCE the summaries with the large one.
-
-        This is not an optimization, it is the only shape that fits. At num_ctx=8192 a
-        single 21K-token prompt does not run, and even if it did the prefill alone would
-        dominate the wall clock. `{chunk}` / `{parts}` are the template placeholders.
-        """
-        parts: list[str] = []
-        for i, chunk in enumerate(chunks):
-            res = self.complete(
-                task=map_task,
-                system=map_system,
-                user=map_user_tmpl.format(chunk=chunk, index=i + 1, total=len(chunks)),
-                agent=agent,
-                run_id=run_id,
-                sensitive=sensitive,
-                max_tokens=map_max_tokens,
-            )
-            parts.append(res.text.strip())
-
-        reduced = self.complete(
-            task=reduce_task,
-            system=reduce_system,
-            user=reduce_user_tmpl.format(parts="\n\n".join(parts), n=len(parts)),
-            agent=agent,
-            run_id=run_id,
-            sensitive=sensitive,
-            schema=reduce_schema,
-            max_tokens=reduce_max_tokens,
-            persona=persona,
-        )
-        return reduced, parts
-
-    # --------------------------------------------------------------- embeddings
-    def embed(
-        self,
-        texts: Sequence[str],
-        *,
-        model: str,
-        agent: str = "core",
-        run_id: str | None = None,
-    ) -> list[list[float]]:
-        for be in self._backends.values():
-            if be.local:
-                return be.embed(texts, model=model)
-        raise NoEligibleBackend("no local backend for embeddings")
-
     def health(self) -> dict[str, tuple[bool, str]]:
         return {name: be.health() for name, be in self._backends.items()}
 
@@ -269,7 +188,6 @@ def default_routes(model_small: str, model_large: str) -> dict[Task, list[str]]:
         Task.EXTRACT: [f"ollama:{model_small}"],
         Task.SUMMARIZE: [f"ollama:{model_small}"],
         Task.SYNTHESIZE: [f"ollama:{model_large}"],
-        Task.REWRITE: [f"ollama:{model_large}"],
     }
 
 
