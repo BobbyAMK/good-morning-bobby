@@ -20,9 +20,12 @@ import keyring
 from .errors import MissingSecret
 
 SERVICE: Final = "pet-agents"
-GOOGLE_SERVICE: Final = "pet-agents.google"
 
-SecretName = Literal["telegram_token", "brave_key", "anthropic_key", "gemini_key", "exa_key"]
+SecretName = Literal[
+    "github_token",
+    "telegram_token",
+    "coinmarketcap_key",
+]
 
 
 def get(name: SecretName) -> str:
