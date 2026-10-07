@@ -1,42 +1,43 @@
-# Measured on this machine
+# Historical morning brief measurements
 
-Anything in the plan marked "estimate" should be replaced by a number here.
-Machine: Apple M1 Pro, 8 cores (6P/2E), 16 GB unified memory, macOS 26.5.2.
+These measurements were recorded on an Apple M1 Pro with 16 GB unified memory.
+They are historical observations, not results from the current checkout.
 
-## LLM throughput (Ollama 0.33.3, num_ctx=8192, measured 2026-09-12)
+## Local inference, recorded 2026-09-12
 
-Models warmed before timing, so these are inference rates and not model-load time.
+Ollama 0.33.3, `num_ctx=8192`, models warmed before timing:
 
 | Model | Prefill | Generation |
-|---|---|---|
-| `qwen2.5:3b-instruct` | ~500-600 tok/s | **46.6 tok/s** |
-| `qwen2.5:7b-instruct-q4_K_M` | ~240-280 tok/s | **22.9 tok/s** |
+| --- | --- | --- |
+| `qwen2.5:3b-instruct` | About 500-600 tokens/s | 46.6 tokens/s |
+| `qwen2.5:7b-instruct-q4_K_M` | About 240-280 tokens/s | 22.9 tokens/s |
 
-Raw points: 3B 575 in -> 1.6s, 3353 in -> 6.6s; 7B 575 in -> 3.1s, 3353 in -> 14.2s.
-Generation: 3B 844 out in 18.1s; 7B 900 out in 39.3s.
+The configured default is the pinned 7B model. These throughput samples do not
+measure the current tech brief's end-to-end runtime. Use `just bench` to measure
+local inference on your own machine.
 
-### What this implies
-- An 8000-token prompt costs **~30s of pure prefill** on the 7B. Prefill dominates.
-- A single 21K-token brief call would be ~80s of prefill AND would not fit in
-  num_ctx=8192 at all. **Map-reduce is not an optimization here, it is the only shape
-  that runs.**
-- Realistic morning-brief budget: MAP 2 batches on the 3B (~12s) + REDUCE on the 7B
-  (~3000 tok prefill = 12s, ~1200 tok output = 52s) = **~80 seconds total**.
-  Better than the plan's 2-4 minute estimate.
+## Deployment and software search, recorded 2026-09-13
 
-## Verified platform facts
+- Deploying unchanged package versions reused an older wheel until explicit package
+  reinstallation was added. `just deploy` reinstalls workspace packages and compares
+  source files with their deployed copies.
+- A Python language filter excluded Python tools implemented in Rust. Search instead
+  adds Python as a keyword where appropriate.
+- npm's broad search could rank unrelated high-download packages first. npm therefore
+  enriches repositories found by GitHub rather than defining the candidate list.
+- Hacker News discussions must match every search keyword in their title.
+- Observed search latency ranged from about 7 seconds for a JavaScript query to
+  about 30 seconds for a Python query. These are samples, not latency guarantees.
 
-- SQLite 3.53.4, FTS5 present. `tokenize='unicode61 remove_diacritics 2'` makes
-  `tai chinh` match `tài chính` -- tested, works. Vietnamese full-text search is free.
-- `httpx2` 2.12.0 installs as the module **`httpx2`**, not `httpx`. (The design sketch
-  had this wrong.)
-- keyring 25.7.0 resolves to the macOS Keychain backend.
-- uv 0.11.17 (Homebrew, so `uv self update` refuses -- use `brew upgrade uv`) builds the
-  workspace fine with `uv_build>=0.11,<0.13`.
-- Ollama models present: `qwen2.5:{1.5b,3b,7b}-instruct`, `qwen2.5:7b-instruct-q4_K_M`,
-  `nomic-embed-text:latest` (768 dims, 2K context -- the 2K ceiling is why project 6
-  should use `bge-m3` instead).
+## Current verification commands
 
-## Still unmeasured
-- `qwen3.5:*` tags: not confirmed to exist. Run `ollama pull` before pinning them.
-- Real end-to-end morning brief wall time (needs the Gmail/Calendar connectors).
+```bash
+just test
+just lint
+just doctor
+uv run pa-core-admin smoke-llm
+uv run python evals/run_search.py
+```
+
+The first two commands check local code. The remaining commands depend on local
+services, credentials, or public endpoints. Report those results separately.
