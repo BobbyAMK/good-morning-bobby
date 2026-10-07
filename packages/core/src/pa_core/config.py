@@ -31,7 +31,6 @@ class Settings(BaseSettings):
     data_dir: Path = Path.home() / "Library/Application Support/pet-agents"
     log_dir: Path = Path.home() / "Library/Logs/pet-agents"
     out_dir: Path | None = None  # defaults to data_dir/out
-    personas_dir: Path = Path("personas")
 
     tz: str = "Asia/Ho_Chi_Minh"
 
@@ -39,29 +38,28 @@ class Settings(BaseSettings):
     ollama_url: str = "http://127.0.0.1:11434"
     model_small: str = "qwen2.5:7b-instruct-q4_K_M"
     model_large: str = "qwen2.5:7b-instruct-q4_K_M"
-    model_embed: str = "bge-m3"
 
-    # The nominal 256K context is a lie at 16 GB -- the KV cache is the binding
-    # constraint, not the weights. This ceiling is WHY the morning brief is map-reduce.
+    # Bound context memory. Summaries are processed in small batches.
     num_ctx: int = 8192
 
-    # Master switch for ANY non-local backend. Off until you turn it on.
-    allow_cloud: bool = False
+    # Optional ledger budget; local inference has no API cost.
     monthly_budget_usd: float | None = 5.0
 
     llm_timeout_s: float = 600.0
     llm_retries: int = 2
 
     # --- delivery
-    sinks: list[str] = Field(default_factory=lambda: ["file", "telegram", "notify"])
+    # Telegram is the ONLY channel you read. "file" is a local archive that always runs
+    # first so output is never lost; it is not a delivery. "notify" (macOS banner) is
+    # still available, but failure alerts use it regardless of this list.
+    sinks: list[str] = Field(default_factory=lambda: ["file", "telegram"])
+    # The sink that counts as "delivered". The watchdog alerts if today's run did not
+    # reach it -- a successful file write must never mask a failed Telegram send.
+    primary_sink: str = "telegram"
     telegram_chat_id: str | None = None  # normally read from the kv table, not here
 
     # --- watchdog: agent -> local clock time by which a run for today must exist
     expected_daily: dict[str, str] = Field(default_factory=lambda: {"morning-brief": "09:00"})
-
-    # --- agent behaviour
-    internal_domains: list[str] = Field(default_factory=list)
-    my_email: str | None = None
 
     @property
     def zone(self) -> ZoneInfo:
@@ -70,10 +68,6 @@ class Settings(BaseSettings):
     @property
     def platform_db(self) -> Path:
         return self.data_dir / "platform.db"
-
-    @property
-    def brain_db(self) -> Path:
-        return self.data_dir / "brain.db"
 
     @property
     def lock_dir(self) -> Path:
