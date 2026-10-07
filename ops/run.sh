@@ -10,6 +10,6 @@ echo "$(date -u +%FT%TZ) START $AGENT $*" >>"$LOG"
 "$@"; rc=$?
 echo "$(date -u +%FT%TZ) EXIT  $AGENT rc=$rc" >>"$LOG"
 if [ "$rc" -ne 0 ]; then
-  /usr/bin/osascript -e "display notification \"$AGENT failed (rc=$rc)\" with title \"pet-agents\" sound name \"Basso\"" || true
+  /usr/bin/osascript -e "display notification \"$AGENT failed (rc=$rc)\" with title \"Good Morning Bobby\" sound name \"Basso\"" || true
 fi
 exit "$rc"
