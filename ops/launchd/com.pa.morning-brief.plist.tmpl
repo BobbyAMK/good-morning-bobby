@@ -5,20 +5,24 @@
 <dict>
   <key>Label</key><string>com.pa.morning-brief</string>
 
-  <!-- Calls the venv console script directly, NOT `uv run`: uv may try to re-resolve
-       and touch the network at 6am. run.sh wraps it to capture the exit code. -->
+  <!-- Calls the DEPLOYED runtime (`just deploy`), never the repo. The repo lives under
+       ~/Documents, which macOS TCC denies to launchd jobs: the first real kickstart died
+       with exit 126 "Operation not permitted" before Python started, and the repo's
+       .venv is editable, so its .pth files point back into ~/Documents as well.
+       Console script directly, NOT `uv run`: uv may re-resolve and touch the network
+       at 6am. run.sh wraps it to capture the exit code. -->
   <key>ProgramArguments</key>
   <array>
-    <string>@@REPO@@/ops/run.sh</string>
+    <string>@@RUNTIME@@/run.sh</string>
     <string>morning-brief</string>
-    <string>@@REPO@@/.venv/bin/pa-morning-brief</string>
+    <string>@@RUNTIME@@/venv/bin/pa-morning-brief</string>
     <string>run</string>
   </array>
 
   <!-- BELT 2. Apple's docs: a missed StartCalendarInterval runs on WAKE, but if the
        Mac was OFF it is skipped until the next occurrence. So we name three
        occurrences. The DB constraint unique(agent, logical_date, dry_run) makes the
-       extra firings cost one failed INSERT and an exit 0 -- if the Mac was off at 6am
+       extra firings cost one failed INSERT and an exit 0 - if the Mac was off at 6am
        and you open it at 10:15, the 12:30 firing produces today's brief, once. -->
   <key>StartCalendarInterval</key>
   <array>
@@ -27,18 +31,18 @@
     <dict><key>Hour</key><integer>12</integer><key>Minute</key><integer>30</integer></dict>
   </array>
 
-  <key>WorkingDirectory</key><string>@@REPO@@</string>
+  <key>WorkingDirectory</key><string>@@RUNTIME@@</string>
   <key>StandardOutPath</key><string>@@HOME@@/Library/Logs/pet-agents/morning-brief.out.log</string>
   <key>StandardErrorPath</key><string>@@HOME@@/Library/Logs/pet-agents/morning-brief.err.log</string>
 
   <!-- launchd gives you almost no environment: no shell profile, no PATH, none of your
-       exports. Everything needed must be explicit. Secrets are NOT here on purpose --
+       exports. Everything needed must be explicit. Secrets are NOT here on purpose -
        a plist in ~/Library/LaunchAgents is world-readable. They live in the Keychain. -->
   <key>EnvironmentVariables</key>
   <dict>
     <key>HOME</key><string>@@HOME@@</string>
     <key>PATH</key><string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
-    <key>PA_ENV_FILE</key><string>@@REPO@@/.env</string>
+    <key>PA_ENV_FILE</key><string>@@RUNTIME@@/.env</string>
     <key>PYTHONUNBUFFERED</key><string>1</string>
   </dict>
 
