@@ -1,4 +1,7 @@
-"""structlog -> JSONL on stdout, which launchd redirects to a file.
+"""structlog -> JSONL on STDERR, which launchd redirects to <agent>.err.log.
+
+stderr, not stdout: stdout belongs to the artifact itself (a dry run prints the brief
+there), and `just logs <agent>` tails the .err.log file.
 
 JSONL because the only tools you will actually have at 6am are `grep` and `jq`.
 Every line carries run_id and agent, bound once in the harness.
@@ -36,7 +39,7 @@ def configure(*, level: str = "INFO", pretty: bool | None = None) -> None:
         wrapper_class=structlog.make_filtering_bound_logger(
             getattr(logging, level.upper(), logging.INFO)
         ),
-        logger_factory=structlog.PrintLoggerFactory(file=sys.stdout),
+        logger_factory=structlog.PrintLoggerFactory(file=sys.stderr),
         cache_logger_on_first_use=True,
     )
 
