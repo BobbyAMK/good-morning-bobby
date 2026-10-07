@@ -19,6 +19,7 @@ from collections.abc import Iterable
 
 import httpx2 as httpx
 
+from ..text import plain_dashes
 from .base import Delivered
 
 API = "https://api.telegram.org"
@@ -47,7 +48,7 @@ def markdown_to_telegram_html(md: str) -> str:
     """
     out: list[str] = []
     in_fence = False
-    for line in md.splitlines():
+    for line in plain_dashes(md).splitlines():
         if line.lstrip().startswith("```"):
             out.append("<pre>" if not in_fence else "</pre>")
             in_fence = not in_fence
@@ -64,7 +65,7 @@ def markdown_to_telegram_html(md: str) -> str:
         s = re.sub(r"\[([^\]]+)\]\((https?://[^\s)]+)\)", r'<a href="\2">\1</a>', s)
         s = re.sub(r"^\s*(#{1,6})\s*(.+)$", r"<b>\2</b>", s)  # Telegram has no headings
         s = re.sub(r"^(\s*)[-*+]\s+", r"\1• ", s)  # real bullet char
-        s = re.sub(r"^\s*---+\s*$", "———", s)  # hr -> em dashes
+        s = re.sub(r"^\s*---+\s*$", "···", s)  # visible separator
         out.append(s)
     if in_fence:
         out.append("</pre>")  # never ship an unclosed tag
@@ -154,11 +155,12 @@ class TelegramSink:
     def _url(self, method: str) -> str:
         return f"/bot{self._token}/{method}"
 
-    def _post(self, method: str, payload: dict) -> dict:
+    def _post(self, method: str, payload: dict, *, timeout: float | None = None) -> dict:
         """One call with 429-aware retry. Telegram returns parameters.retry_after."""
         last = ""
         for attempt in range(1, self._retries + 1):
-            r = self._c.post(self._url(method), json=payload)
+            kw = {"timeout": timeout} if timeout is not None else {}
+            r = self._c.post(self._url(method), json=payload, **kw)
             if r.status_code == 200:
                 return r.json()
             try:
@@ -180,24 +182,56 @@ class TelegramSink:
         self, *, title: str, body_markdown: str, run_id: str, urgent: bool = False
     ) -> Delivered:
         body = f"# {title}\n\n{body_markdown}" if title else body_markdown
-        first_id: str | None = None
         try:
-            for part in chunk_html(markdown_to_telegram_html(body)):
-                res = self._send_one(part, urgent=urgent)
-                first_id = first_id or str(res.get("result", {}).get("message_id", ""))
-                time.sleep(0.35)  # 1 msg/s per chat; stay under it
-            return Delivered(self.name, first_id, True)
+            ids = self.send_message(body, notify=urgent)
+            # ALL message ids, comma-joined: a brief split into two messages must be
+            # findable from a reply to either part.
+            return Delivered(self.name, ",".join(map(str, ids)) or None, True)
         except Exception as e:
             return Delivered(self.name, None, False, f"{type(e).__name__}: {e}"[:300])
 
-    def _send_one(self, text: str, *, urgent: bool) -> dict:
-        payload = {
+    def send_message(
+        self, body_markdown: str, *, reply_to: int | None = None, notify: bool = False
+    ) -> list[int]:
+        """Markdown -> Telegram HTML -> chunks. Returns every message id, in order.
+        Only the first chunk is threaded as a reply."""
+        ids: list[int] = []
+        for i, part in enumerate(chunk_html(markdown_to_telegram_html(body_markdown))):
+            if i:
+                time.sleep(0.35)  # 1 msg/s per chat; stay under it
+            res = self._send_one(part, urgent=notify, reply_to=reply_to if i == 0 else None)
+            ids.append(int(res.get("result", {}).get("message_id", 0)))
+        return ids
+
+    def pin(self, message_id: int) -> None:
+        """Private chats need no admin right: any non-service message can be pinned."""
+        self._post(
+            "pinChatMessage",
+            {"chat_id": self._chat, "message_id": message_id, "disable_notification": True},
+        )
+
+    def set_my_commands(self, commands: list[tuple[str, str]]) -> None:
+        self._post(
+            "setMyCommands",
+            {"commands": [{"command": c, "description": d} for c, d in commands]},
+        )
+
+    def typing(self) -> None:
+        self._post("sendChatAction", {"chat_id": self._chat, "action": "typing"})
+
+    def _send_one(self, text: str, *, urgent: bool, reply_to: int | None = None) -> dict:
+        payload: dict = {
             "chat_id": self._chat,
             "text": text,
             "parse_mode": "HTML",
             "link_preview_options": {"is_disabled": True},
             "disable_notification": not urgent,
         }
+        if reply_to:
+            payload["reply_parameters"] = {
+                "message_id": reply_to,
+                "allow_sending_without_reply": True,
+            }
         try:
             return self._post("sendMessage", payload)
         except _TgError as e:
@@ -209,9 +243,9 @@ class TelegramSink:
                 return self._post(
                     "sendMessage",
                     {
-                        "chat_id": self._chat,
-                        "text": plain[:TG_LIMIT],
-                        "disable_notification": not urgent,
+                        k: v
+                        for k, v in {**payload, "text": plain[:TG_LIMIT]}.items()
+                        if k != "parse_mode"
                     },
                 )
             raise
@@ -226,13 +260,24 @@ class TelegramSink:
         r.raise_for_status()
         return r.json()
 
-    def get_updates(self, *, offset: int | None = None, timeout: int = 0) -> list[dict]:
+    def get_updates(
+        self,
+        *,
+        offset: int | None = None,
+        timeout: int = 0,
+        allowed_updates: list[str] | None = None,
+    ) -> list[dict]:
         """getUpdates and setWebhook are mutually exclusive; a local Mac has no public
-        URL, so long-polling getUpdates is the only option for inbound."""
+        URL, so long-polling getUpdates is the only option for inbound.
+
+        The HTTP timeout must outlast the long-poll `timeout`, or every quiet poll
+        would surface as a client-side timeout error."""
         payload: dict = {"timeout": timeout}
         if offset is not None:
             payload["offset"] = offset
-        res = self._post("getUpdates", payload)
+        if allowed_updates is not None:
+            payload["allowed_updates"] = allowed_updates
+        res = self._post("getUpdates", payload, timeout=timeout + 15.0)
         return res.get("result", [])
 
     def me(self) -> dict:
@@ -267,3 +312,6 @@ def iter_allowed(updates: Iterable[dict], allowed_chat_id: str) -> Iterable[dict
         msg = upd.get("message") or upd.get("edited_message") or {}
         if str((msg.get("chat") or {}).get("id")) == str(allowed_chat_id):
             yield upd
+
+
+TelegramError = _TgError  # public name for callers that branch on status (409, 400)
