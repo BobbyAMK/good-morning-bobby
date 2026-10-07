@@ -5,37 +5,41 @@
 <dict>
   <key>Label</key><string>com.pa.watchdog</string>
 
-  <!-- Calls the venv console script directly, NOT `uv run`: uv may try to re-resolve
-       and touch the network at 6am. run.sh wraps it to capture the exit code. -->
+  <!-- Calls the DEPLOYED runtime (`just deploy`), never the repo. The repo lives under
+       ~/Documents, which macOS TCC denies to launchd jobs: the first real kickstart died
+       with exit 126 "Operation not permitted" before Python started, and the repo's
+       .venv is editable, so its .pth files point back into ~/Documents as well.
+       Console script directly, NOT `uv run`: uv may re-resolve and touch the network
+       at 6am. run.sh wraps it to capture the exit code. -->
   <key>ProgramArguments</key>
   <array>
-    <string>@@REPO@@/ops/run.sh</string>
+    <string>@@RUNTIME@@/run.sh</string>
     <string>watchdog</string>
-    <string>@@REPO@@/.venv/bin/pa-core-admin</string>
+    <string>@@RUNTIME@@/venv/bin/pa-core-admin</string>
     <string>watchdog</string>
   </array>
 
   <!-- The dead-man's switch. Runs AFTER the brief's last chance, and asks the only
        question that matters: did the thing that should exist, exist? This is the only
-       layer that can see silent non-execution -- a job unloaded by an OS update, a
+       layer that can see silent non-execution - a job unloaded by an OS update, a
        plist typo, a full disk, Ollama not running, the Mac being off. -->
   <key>StartCalendarInterval</key>
   <array>
     <dict><key>Hour</key><integer>9</integer><key>Minute</key><integer>30</integer></dict>
     <dict><key>Hour</key><integer>13</integer><key>Minute</key><integer>0</integer></dict>
   </array>
-  <key>WorkingDirectory</key><string>@@REPO@@</string>
-  <key>StandardOutPath</key><string>@@HOME@@/Library/Logs/pet-agents/morning-brief.out.log</string>
-  <key>StandardErrorPath</key><string>@@HOME@@/Library/Logs/pet-agents/morning-brief.err.log</string>
+  <key>WorkingDirectory</key><string>@@RUNTIME@@</string>
+  <key>StandardOutPath</key><string>@@HOME@@/Library/Logs/pet-agents/watchdog.out.log</string>
+  <key>StandardErrorPath</key><string>@@HOME@@/Library/Logs/pet-agents/watchdog.err.log</string>
 
   <!-- launchd gives you almost no environment: no shell profile, no PATH, none of your
-       exports. Everything needed must be explicit. Secrets are NOT here on purpose --
+       exports. Everything needed must be explicit. Secrets are NOT here on purpose -
        a plist in ~/Library/LaunchAgents is world-readable. They live in the Keychain. -->
   <key>EnvironmentVariables</key>
   <dict>
     <key>HOME</key><string>@@HOME@@</string>
     <key>PATH</key><string>/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
-    <key>PA_ENV_FILE</key><string>@@REPO@@/.env</string>
+    <key>PA_ENV_FILE</key><string>@@RUNTIME@@/.env</string>
     <key>PYTHONUNBUFFERED</key><string>1</string>
   </dict>
 
