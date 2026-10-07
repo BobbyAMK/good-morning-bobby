@@ -5,17 +5,18 @@ from __future__ import annotations
 import shutil
 import subprocess
 
+from ..text import plain_dashes
 from .base import Delivered
 
 
 def _esc(s: str) -> str:
-    return s.replace("\\", "\\\\").replace('"', '\\"')
+    return plain_dashes(s).replace("\\", "\\\\").replace('"', '\\"')
 
 
 class MacNotifySink:
     name = "notify"
 
-    def __init__(self, *, app_title: str = "pet-agents") -> None:
+    def __init__(self, *, app_title: str = "Good Morning Bobby") -> None:
         self._title = app_title
 
     def deliver(
