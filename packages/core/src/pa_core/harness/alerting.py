@@ -6,7 +6,7 @@ Three independent layers, because each can fail:
      when the network is down, the token is bad, or the process never started.
   2. ops/run.sh: non-zero exit -> log + osascript notification. Catches hard crashes,
      OOM kills, import errors. Fails when the job never ran at all.
-  3. THIS watchdog, 09:00 and 13:00. Catches "nothing happened" -- a launchd job
+  3. THIS watchdog, 09:30 and 13:00. Catches "nothing happened" -- a launchd job
      unloaded by an OS update, the Mac being off, a plist syntax error, a full disk,
      Ollama not running. It is the only layer that can see silent non-execution.
 
@@ -64,7 +64,7 @@ def preflight(cfg: Settings) -> list[str]:
     except Exception as e:
         problems.append(f"ollama preflight failed: {type(e).__name__}: {e}")
 
-    # Disk space -- brain.db and WAL files are the usual culprit.
+    # Disk space for the database, logs, and archived briefs.
     try:
         import shutil
 
@@ -74,7 +74,47 @@ def preflight(cfg: Settings) -> list[str]:
     except OSError as e:
         problems.append(f"disk check failed: {e}")
 
+    problems += services_not_running()
     return problems
+
+
+# launchd KeepAlive services. Checked by asking launchd, NOT by a heartbeat: a heartbeat
+# goes stale every time the Mac sleeps, and the watchdog replays right after wake.
+SERVICES = ("com.pa.bot",)
+
+
+def services_not_running(labels: tuple[str, ...] = SERVICES) -> list[str]:
+    import os
+    import subprocess
+    from pathlib import Path
+
+    out = []
+    for label in labels:
+        if not (Path.home() / "Library/LaunchAgents" / f"{label}.plist").exists():
+            continue  # not installed on this machine: nothing to expect
+        try:
+            res = subprocess.run(
+                ["launchctl", "print", f"gui/{os.getuid()}/{label}"],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+        except (OSError, subprocess.SubprocessError) as e:
+            out.append(f"{label}: launchctl failed: {e}")
+            continue
+        if res.returncode != 0:
+            out.append(f"{label}: installed but not loaded -- run: just install-brief")
+        elif "state = running" not in res.stdout:
+            exit_code = next(
+                (
+                    ln.split("=", 1)[1].strip()
+                    for ln in res.stdout.splitlines()
+                    if "last exit code" in ln
+                ),
+                "?",
+            )
+            out.append(f"{label}: not running (last exit code {exit_code}) -- see: just bot-logs")
+    return out
 
 
 def watchdog_check(con: sqlite3.Connection, cfg: Settings, now: datetime) -> list[str]:
@@ -104,15 +144,17 @@ def watchdog_check(con: sqlite3.Connection, cfg: Settings, now: datetime) -> lis
         elif row["status"] == "failed":
             problems.append(f"{agent}: failed -- {row['error_type']}: {row['error_msg']}")
 
-    # Produced output but delivered nothing to any sink.
+    # Produced output but it never reached the channel you actually read. Checking "any
+    # sink" here was a real bug: the file sink always succeeds, so a revoked Telegram
+    # token or an unbound chat looked like a clean delivery and nothing ever alerted.
     for r in con.execute(
         """select a.agent from agent_run a
             where a.logical_date = ? and a.status = 'ok' and a.dry_run = 0
               and not exists (select 1 from delivery d
-                               where d.run_id = a.run_id and d.ok = 1)""",
-        (today,),
+                               where d.run_id = a.run_id and d.sink = ? and d.ok = 1)""",
+        (today, cfg.primary_sink),
     ):
-        problems.append(f"{r['agent']}: produced output but delivered nothing")
+        problems.append(f"{r['agent']}: produced output but NOT delivered to {cfg.primary_sink}")
 
     problems += preflight(cfg)
     return problems
