@@ -1,4 +1,4 @@
-"""The run harness. Build this before any agent logic; every agent then comes cheap.
+"""The morning brief run harness.
 
 Guarantees, in order of how much grief they save:
   1. Exactly one run per (agent, logical_date) -- enforced by a DB constraint, so
@@ -31,10 +31,10 @@ from ..config import Settings
 from ..config import load as load_settings
 from ..delivery.base import Delivered, Sink
 from ..errors import AlreadyRan, AlreadyRunning, PaError
-from ..llm.base import Task
 from ..llm.router import LLM, default_routes
 from ..llm.usage import UsageLog
 from ..store import db, migrate
+from ..text import plain_dashes
 from . import alerting
 from .guards import single_instance, time_limit
 
@@ -76,13 +76,13 @@ class RunContext:
             return dry_value
         return fn()
 
-    def persona(self, slug: str = "default") -> str | None:
-        from ..persona.store import load_card
-
-        return load_card(self.cfg, slug)
-
 
 def _git_sha(repo: str | None = None) -> str | None:
+    # The deployed runtime has no .git; `just deploy` writes the version next to it.
+    version = os.path.join(repo or os.getcwd(), "VERSION")
+    if os.path.isfile(version):
+        with open(version) as f:
+            return f.read().strip() or None
     try:
         out = subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"],
@@ -116,7 +116,7 @@ def build_sinks(cfg: Settings, con: sqlite3.Connection, *, agent: str, now: date
             else:
                 log.warning(
                     "sink.telegram_unconfigured",
-                    hint="keyring set pet-agents telegram_token; then telegram-bind",
+                    hint="just telegram-token; then just telegram-bind",
                 )
         elif name == "notify":
             out.append(MacNotifySink())
@@ -129,28 +129,10 @@ def build_llm(cfg: Settings, usage: UsageLog) -> LLM:
     from ..llm.ollama import OllamaBackend
 
     backends = {"ollama": OllamaBackend(cfg.ollama_url, num_ctx=cfg.num_ctx)}
-    routes_ns: dict[Task, list[str]] = {}
-    if cfg.allow_cloud:
-        from .. import secrets as sec
-
-        key = sec.get_optional("anthropic_key")
-        if key:
-            try:
-                from ..llm.anthropic_be import AnthropicBackend
-
-                backends["anthropic"] = AnthropicBackend(key)
-                routes_ns = {
-                    Task.SYNTHESIZE: ["anthropic:claude-opus-5"],
-                    Task.REWRITE: ["anthropic:claude-sonnet-5"],
-                }
-            except ImportError:
-                log.warning("llm.anthropic_extra_missing", hint="uv sync --extra anthropic")
     return LLM(
         backends=backends,
         routes=default_routes(cfg.model_small, cfg.model_large),
-        routes_nonsensitive=routes_ns,
         usage=usage,
-        allow_cloud=cfg.allow_cloud,
         default_timeout_s=cfg.llm_timeout_s,
         retries=cfg.llm_retries,
     )
@@ -186,7 +168,10 @@ def run_agent(
 
             alerting.stale_running_to_failed(con, older_than_s=timeout_s * 2)
 
-            if force:
+            # A dry run touches nothing, so "already ran today" must never block it. It
+            # only replaces the previous DRY row (dry_run is part of the unique key), so
+            # it can never unblock or overwrite a real run.
+            if force or dry_run:
                 con.execute(
                     "delete from agent_run where agent=? and logical_date=? and dry_run=?",
                     (agent, lday.isoformat(), int(dry_run)),
@@ -291,6 +276,10 @@ def _finish_failed(con, run_id: str, started: datetime, cfg: Settings, e: BaseEx
 
 
 def _deliver(ctx: RunContext, result: AgentResult) -> None:
+    if ctx.dry_run:
+        # A dry run delivers nowhere, so the artifact goes to stdout -- otherwise there
+        # is nothing to look at. Logs are on stderr, so `> brief.md` captures just this.
+        print(plain_dashes(f"# {result.title}\n\n{result.body_markdown}"), flush=True)
     for sink in ctx.sinks:
         d: Delivered = ctx.mutate(
             f"deliver via {sink.name}",
@@ -331,7 +320,7 @@ def run_watchdog(cfg: Settings | None = None, *, log_level: str = "INFO") -> int
         cfg,
         con,
         agent="watchdog",
-        title="pet-agents: something did not run",
+        title="Good Morning Bobby: scheduled brief missing",
         body="\n".join(f"- {p}" for p in problems),
         run_id="watchdog",
     )
