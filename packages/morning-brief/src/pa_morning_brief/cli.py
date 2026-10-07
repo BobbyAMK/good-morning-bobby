@@ -5,9 +5,13 @@ from datetime import date
 import typer
 from pa_core.harness.run import run_agent
 
-from .agent import AGENT, build
+from .tech_agent import AGENT, build
 
-app = typer.Typer(no_args_is_help=True, add_completion=False, help="Morning brief agent.")
+app = typer.Typer(
+    no_args_is_help=True,
+    add_completion=False,
+    help="Morning tech brief: the last 24h in tech, never repeated.",
+)
 
 
 @app.command()
@@ -15,14 +19,13 @@ def run(
     dry_run: bool = typer.Option(False, "--dry-run", help="Compute and print; touch nothing."),
     force: bool = typer.Option(False, "--force", help="Regenerate even if today already ran."),
     for_date: str = typer.Option(None, "--date", help="logical date, YYYY-MM-DD."),
-    mail_limit: int = typer.Option(60, help="Max messages to consider."),
     timeout: int = typer.Option(900, help="Hard wall-clock limit, seconds."),
     log_level: str = typer.Option("INFO"),
 ) -> None:
-    """Generate today's brief."""
+    """Generate today's tech brief."""
     rc = run_agent(
         AGENT,
-        lambda ctx: build(ctx, mail_limit=mail_limit),
+        build,
         logical_date=date.fromisoformat(for_date) if for_date else None,
         dry_run=dry_run,
         force=force,
