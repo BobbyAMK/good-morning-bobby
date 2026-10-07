@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Protocol, runtime_checkable
@@ -18,7 +17,6 @@ class Task(StrEnum):
     EXTRACT = "extract"  # structured fields out of text        -> small model
     SUMMARIZE = "summarize"  # the per-source MAP step              -> small model
     SYNTHESIZE = "synthesize"  # the REDUCE step: brief, verdict, plan -> largest local
-    REWRITE = "rewrite"  # voice-matched prose                  -> largest local
 
 
 SMALL_TASKS = frozenset({Task.CLASSIFY, Task.EXTRACT, Task.SUMMARIZE})
@@ -62,8 +60,6 @@ class LLMBackend(Protocol):
         cacheable_prefix: str | None,
         timeout_s: float,
     ) -> LLMResult: ...
-
-    def embed(self, texts: Sequence[str], *, model: str) -> list[list[float]]: ...
 
     def health(self) -> tuple[bool, str]: ...
 
